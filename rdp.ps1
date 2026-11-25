@@ -2,7 +2,7 @@ function Log($msg) { Write-Host "[$(Get-Date -Format 'HH:mm:ss')] $msg" }
 
 # ===== 0. Comprobaciones iniciales =====
 Log "=== INICIO ==="
-$authKey = 'tskey-auth-k6LJ1wFAdJ11CNTRL-JdypnTNHu7EsggJZcroL7EcDsmWF4NUt'
+$authKey = 'tskey-auth-k1ws48sWe821CNTRL-Tn1f1SgdtWArmTdT1Z7HXAxSXj9maZKF'
 Log "Auth key cargada (longitud: $($authKey.Length))"
 
 # ===== 1. Configure Core RDP Settings =====
