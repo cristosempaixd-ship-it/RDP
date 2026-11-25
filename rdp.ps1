@@ -2,7 +2,7 @@ function Log($msg) { Write-Host "[$(Get-Date -Format 'HH:mm:ss')] $msg" }
 
 # ===== 0. Comprobaciones iniciales =====
 Log "=== INICIO ==="
-$authKey = 'tskey-auth-k1ws48sWe821CNTRL-Tn1f1SgdtWArmTdT1Z7HXAxSXj9maZKF'
+$authKey = 'tskey-auth-k6LJ1wFAdJ11CNTRL-JdypnTNHu7EsggJZcroL7EcDsmWF4NUt'
 Log "Auth key cargada (longitud: $($authKey.Length))"
 
 # ===== 1. Configure Core RDP Settings =====
@@ -36,8 +36,8 @@ if (-not (Get-LocalUser -Name "hesiz")) {
 Log "[2/6] Usuario hesiz creado correctamente"
 
 # ===== 3. Install Tailscale =====
-Log "[3/6] Descargando Tailscale..."
-$tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+Log "[3/6] Descargando Tailscale (ultima version)..."
+$tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
 $installerPath = "$env:TEMP\tailscale.msi"
 
 Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
@@ -51,29 +51,42 @@ if (-not (Test-Path $tsExe)) {
     Log "ERROR: no existe $tsExe, la instalacion fallo"
     exit 1
 }
-Log "[3/6] Tailscale instalado. Servicio: $((Get-Service Tailscale -ErrorAction SilentlyContinue).Status)"
+Log "Version de Tailscale: $(& $tsExe version | Select-Object -First 1)"
+Log "Servicio Tailscale: $((Get-Service Tailscale -ErrorAction SilentlyContinue).Status)"
 
 # ===== 4. Establish Tailscale Connection =====
-Log "[4/6] Conectando a Tailscale (timeout 60s)..."
-& $tsExe up --authkey=$authKey --hostname=gh-runner-$env:GITHUB_RUN_ID --timeout=60s
-Log "[4/6] 'tailscale up' termino con codigo: $LASTEXITCODE"
-
-Log "Estado de Tailscale:"
-& $tsExe status
+Log "[4/6] Probando conexion a los servidores de Tailscale..."
+foreach ($h in @("controlplane.tailscale.com", "login.tailscale.com")) {
+    $t = Test-NetConnection -ComputerName $h -Port 443 -WarningAction SilentlyContinue
+    Log "  $h:443 -> TcpTestSucceeded=$($t.TcpTestSucceeded)"
+}
+Log "netcheck:"
+& $tsExe netcheck 2>&1 | ForEach-Object { Log "  $_" }
 
 $tsIP = $null
-$retries = 0
-while (-not $tsIP -and $retries -lt 10) {
-    $tsIP = & $tsExe ip -4
+for ($attempt = 1; $attempt -le 3 -and -not $tsIP; $attempt++) {
+    Log "[4/6] Intento $attempt/3: tailscale up (timeout 90s)..."
+    & $tsExe up --reset --authkey=$authKey --hostname=gh-runner-$env:GITHUB_RUN_ID --timeout=90s 2>&1 | ForEach-Object { Log "  $_" }
+    Log "[4/6] 'tailscale up' termino con codigo: $LASTEXITCODE"
+
+    Log "Estado de Tailscale:"
+    & $tsExe status 2>&1 | ForEach-Object { Log "  $_" }
+
+    $tsIP = (& $tsExe ip -4 2>$null | Select-Object -First 1)
+
     if (-not $tsIP) {
-        $retries++
-        Log "[4/6] Esperando IP... intento $retries/10"
+        Log "Sin IP. Ultimas lineas del log de Tailscale:"
+        Get-ChildItem "$env:ProgramData\Tailscale" -Recurse -Include *.log -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1 |
+            ForEach-Object { Get-Content $_.FullName -Tail 40 | ForEach-Object { Log "  $_" } }
+        Log "Reiniciando servicio Tailscale..."
+        Restart-Service -Name Tailscale -Force
         Start-Sleep -Seconds 5
     }
 }
 
 if (-not $tsIP) {
-    Log "ERROR: Tailscale no asigno IP. Probablemente el auth key es invalido o expiro."
+    Log "ERROR: Tailscale no asigno IP despues de 3 intentos."
     exit 1
 }
 Log "[4/6] IP de Tailscale: $tsIP"
